@@ -18,6 +18,13 @@ export function Dev() {
   const [data, setData] = useState<DevData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [accountUrl, setAccountUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    api<{ accountUrl: string | null }>("/api/auth/options")
+      .then((d) => setAccountUrl(d.accountUrl))
+      .catch(() => setAccountUrl(null));
+  }, []);
 
   const load = () =>
     api<DevData>("/api/dev/apps")
@@ -51,6 +58,11 @@ export function Dev() {
         </button>
       </div>
 
+      {accountUrl && (
+        <p className="small muted">
+          アプリの登録（開発者設定）は、<a href={accountUrl} target="_blank" rel="noreferrer">仙人アカウントの画面</a>で行います。
+        </p>
+      )}
       {error && <p className="notice error">{error}</p>}
       {message && <p className="notice">{message}</p>}
       {data?.suspended && (

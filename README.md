@@ -45,6 +45,8 @@ senninai（AI チャット）、ミニゲーム、SenninPay（送金）、Sennin
    - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`（Settings → API）
    - `APPS_ENCRYPTION_KEY`（長いランダムな文字列。仙人アカウントの更新トークンを暗号化します）
    - `SENNIN_BASE_URL` / `SENNIN_CLIENT_ID` / `SENNIN_CLIENT_SECRET` / `SENNIN_REDIRECT_URI`（既存のソラチャットと同じ設定名です）
+   - `SENNIN_BASE_URL` は仙人アカウントの API（`https://sennin-account-api.xianrendesu.workers.dev/`）、`SENNIN_ACCOUNT_URL` は仙人アカウントの画面（GAS）です。
+     画面の URL は、開発者設定や新規登録への案内にだけ使います。
    - `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN`（画像の保存先。ソラチャットと同じ値でかまいません）
    - `APP_ORIGIN`、`ADMIN_PASSWORD`
 3. 仙人アカウントの開発者設定に、リダイレクトURI（`SENNIN_REDIRECT_URI`）を登録します。
@@ -77,6 +79,23 @@ senninai（AI チャット）、ミニゲーム、SenninPay（送金）、Sennin
 
 - `npm run test:rules`：自動チェック（画像の形式・禁止語・価格・CSP・隔離文書の枠抜け防止・ブリッジの依頼の上限・保存の上限）。
   DB や仙人アカウントには触れません。
+
+## 仙人アカウント（あかうんと）との連携の仕様
+
+連携は、仙人アカウントの OAuth 2.0 認可コードフロー（PKCE・S256）です。仕様の要点は次のとおりです。
+
+- 認可：`GET {SENNIN_BASE_URL}/oauth/authorize`。ログインと同意は仙人アカウント側の画面で行います。このアプリはパスワードを扱いません。
+- トークン：`POST /oauth/token`。クライアント認証は Basic 認証だけを使います。
+  - 認可コードは10分・1回限り。アクセストークンは1時間、更新トークンは30日で、更新するたびに新しいものに入れ替わります（暗号化して保存し直します）。
+  - `invalid_grant` は、その人の許可が無効になったことを表すので、連携を解除します。`invalid_client` はアプリの設定の問題なので、連携は残して管理者に確認を促します。
+- 要求するスコープは `profile points:read points:write`。`points:write` は仙人アカウント側の管理者だけが付与できます。
+  付与されていないと認可画面で `invalid_scope` になり、「管理者に確認してください」と表示します。
+  同意の結果に `points:*` が含まれなかったときは、そのトークンを失効させてログインを止めます。
+- ユーザーの識別は仙人アカウントの `sub`（応答の `id` も受け付けます）。名前は表示だけに使います。
+- ポイントの加算・減算は `POST /api/v1/points/adjust`。`amount` は0以外の整数、`reason` は1〜100文字、`idempotency_key` は `sa-<支払いID>` の形で、同じ操作の再送には同じキーを使います。
+  送信前に、この条件を確かめます。
+- 401 `invalid_token` のときは、更新トークンで取り直して1回だけ再試行します。429 `daily_limit_exceeded` は「上限に達した」と表示します。
+- 仙人アカウントの認可画面に送る前に、`state` と PKCE の verifier を、10分有効な HttpOnly の Cookie に入れます。
 
 ## 注意（未確認の点）
 

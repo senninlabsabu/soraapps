@@ -24,6 +24,11 @@ export const DEFINITE_FAILURE = new Set(["insufficient_points", "scope", "daily_
 
 export const NOT_LINKED_MESSAGE = "仙人アカウントとの連携が切れています。ログインし直してください。";
 
+// 文字数で切る（UTF-16 の途中で切ると、サロゲートペアの文字が壊れるため）
+export function clipText(text: string, max: number): string {
+  return Array.from(text).slice(0, max).join("");
+}
+
 // 同じキーの処理を1つずつ行うための簡単なロック（このサーバー1台の中で有効）
 const locks = new Map<string, Promise<unknown>>();
 export function withLock<T>(key: string, task: () => Promise<T>): Promise<T> {
@@ -40,7 +45,7 @@ export function withLock<T>(key: string, task: () => Promise<T>): Promise<T> {
 const accessCache = new Map<string, { token: string; expires: number }>();
 
 function requireApi(url: string): string {
-  if (!url || !config.sennin.clientId) {
+  if (!url || !config.sennin.clientId || !config.sennin.clientSecret) {
     console.error(`[sennin] 仙人アカウントの設定が足りません: ${missingSenninSettings().join("、") || "ポイントのURL"}`);
     throw new SenninError("unavailable", "仙人アカウントは現在利用できません。");
   }
@@ -68,15 +73,14 @@ export async function clearLink(userId: string) {
   if (error) throw error;
 }
 
+// クライアント認証は client_secret_basic（Basic ヘッダ）だけを使う。
+// 本文に client_id / client_secret を入れると、認証方式が二重になるため入れない。
 function clientAuthHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {
+  return {
     "content-type": "application/x-www-form-urlencoded",
-    accept: "application/json"
+    accept: "application/json",
+    authorization: `Basic ${Buffer.from(`${config.sennin.clientId}:${config.sennin.clientSecret}`).toString("base64")}`
   };
-  if (config.sennin.clientSecret) {
-    headers.authorization = `Basic ${Buffer.from(`${config.sennin.clientId}:${config.sennin.clientSecret}`).toString("base64")}`;
-  }
-  return headers;
 }
 
 async function postToken(body: Record<string, string>) {
@@ -85,7 +89,7 @@ async function postToken(body: Record<string, string>) {
     const response = await fetch(url, {
       method: "POST",
       headers: clientAuthHeaders(),
-      body: new URLSearchParams({ ...body, client_id: config.sennin.clientId }),
+      body: new URLSearchParams(body),
       signal: AbortSignal.timeout(10_000)
     });
     const data: any = await response.json().catch(() => ({}));
@@ -104,9 +108,28 @@ export async function exchangeCode(code: string, verifier: string) {
     code_verifier: verifier
   });
   if (status !== 200 || typeof data.access_token !== "string") {
+    if (data?.error === "invalid_grant") {
+      throw new SenninError("unavailable", "認証の有効期限が切れました。もう一度ログインしてください。");
+    }
+    if (data?.error === "invalid_client") {
+      console.error("[sennin] client_id / client_secret が仙人アカウントに認められません（アプリの設定を確認）");
+      throw new SenninError("unavailable", "仙人アカウントの設定に問題があります。管理者に確認してください。");
+    }
     throw new SenninError("unavailable", "仙人アカウントのトークンを取得できませんでした。");
   }
-  return data as { access_token: string; refresh_token?: unknown };
+  return data as { access_token: string; refresh_token?: unknown; scope?: unknown };
+}
+
+// トークンを失効させる（RFC 7009）。失敗しても画面の流れは止めない
+export async function revokeSenninToken(token: string): Promise<void> {
+  const url = config.sennin.revokeUrl;
+  if (!url || !config.sennin.clientId || !config.sennin.clientSecret) return;
+  await fetch(url, {
+    method: "POST",
+    headers: clientAuthHeaders(),
+    body: new URLSearchParams({ token }),
+    signal: AbortSignal.timeout(10_000)
+  }).catch(() => undefined);
 }
 
 // アクセストークンでプロフィールを読む
@@ -142,9 +165,15 @@ async function refreshAccessToken(userId: string): Promise<string> {
       throw new SenninError("unavailable", "仙人アカウントが混み合っています。時間をおいてお試しください。");
     }
     if (status !== 200 || typeof token.access_token !== "string") {
-      if (token.error === "invalid_grant" || token.error === "invalid_client") {
+      // invalid_grant は、このユーザーの許可が取り消された・無効になったことを表す（連携を解除する）
+      if (token.error === "invalid_grant") {
         await clearLink(userId);
         throw new SenninError("not_linked", NOT_LINKED_MESSAGE);
+      }
+      // invalid_client はアプリ側の設定の問題（ユーザーの連携とは無関係）なので、連携は残す
+      if (token.error === "invalid_client") {
+        console.error("[sennin] client 認証に失敗（client_id / client_secret・アプリの無効化を確認）");
+        throw new SenninError("unavailable", "仙人アカウントの設定に問題があります。管理者に確認してください。");
       }
       throw new SenninError("unavailable", "仙人アカウントの確認に失敗しました。時間をおいてお試しください。");
     }
@@ -206,9 +235,18 @@ export async function adjustPoints(
   userId: string,
   args: { amount: number; reason: string; idempotencyKey: string }
 ): Promise<AdjustResult> {
+  // 仙人アカウントに送る前に、仕様の条件（整数・0以外・理由1〜100文字・キーの形式）を確かめる
+  if (!Number.isSafeInteger(args.amount) || args.amount === 0) {
+    throw new SenninError("invalid", "ポイントは 0 以外の整数で指定してください。");
+  }
+  const reason = clipText(args.reason.trim(), 100);
+  if (!reason) throw new SenninError("invalid", "ポイントの理由を入れてください。");
+  if (!/^[A-Za-z0-9_.:-]{8,64}$/.test(args.idempotencyKey)) {
+    throw new SenninError("invalid", "処理IDの形式が正しくありません。");
+  }
   const { status, data } = await senninRequest(userId, config.sennin.pointsAdjustUrl, "POST", {
     amount: args.amount,
-    reason: args.reason,
+    reason,
     idempotency_key: args.idempotencyKey
   });
   if (status === 200 && data?.ok) {

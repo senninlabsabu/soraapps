@@ -28,6 +28,9 @@ const apiUrl = (path: string, tokenUrl: string) => {
 
 const tokenUrl = senninUrl(env("SENNIN_TOKEN_URL"), "/oauth/token");
 
+// 仙人アカウントの画面（GAS）。開発者設定（アプリの登録）や新規登録の案内に使う。API には使わない
+const senninAccountUrl = env("SENNIN_ACCOUNT_URL").replace(/\/+$/, "");
+
 // このアプリ自身のURL（仙人アカウントから戻ったあとの飛び先）
 const appOrigin = (env("APP_ORIGIN") || "http://localhost:5173").replace(/\/+$/, "");
 
@@ -47,12 +50,14 @@ export const config = {
   // 画像の保存先（Turso）。元のソラチャットと同じ環境変数
   tursoUrl: need("TURSO_DATABASE_URL"),
   tursoAuthToken: need("TURSO_AUTH_TOKEN"),
+  senninAccountUrl,
   sennin: {
     clientId: env("SENNIN_CLIENT_ID"),
     clientSecret: env("SENNIN_CLIENT_SECRET"),
     redirectUri: env("SENNIN_REDIRECT_URI") || `${appOrigin}/api/auth/sennin/callback`,
     authorizationUrl: senninUrl(env("SENNIN_AUTHORIZATION_URL"), "/oauth/authorize"),
     tokenUrl,
+    revokeUrl: senninUrl(env("SENNIN_REVOKE_URL"), "/oauth/revoke"),
     userinfoUrl: senninUrl(env("SENNIN_USERINFO_URL"), "/oauth/userinfo"),
     meUrl: senninUrl(env("SENNIN_ME_URL"), "/api/v1/me"),
     scope: senninScope,

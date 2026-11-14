@@ -6,7 +6,7 @@ import { config, missingSenninSettings } from "./config.js";
 import { cookieBase, endSession, sessionUserId, SESSION_COOKIE, startSession } from "./session.js";
 import { randomToken } from "./crypto.js";
 import { sb } from "./supabase.js";
-import { exchangeCode, fetchProfile, isLinked, saveRefreshToken, SenninError } from "./sennin.js";
+import { exchangeCode, fetchProfile, isLinked, revokeSenninToken, saveRefreshToken, SenninError } from "./sennin.js";
 import { retryCreatorPayouts } from "./payments.js";
 
 export const auth = Router();
@@ -14,10 +14,34 @@ export const auth = Router();
 const OAUTH_COOKIE = "sa_oauth";
 
 auth.get("/auth/options", (_req, res) => {
-  const { clientId, authorizationUrl, tokenUrl, redirectUri } = config.sennin;
+  const { clientId, clientSecret, authorizationUrl, tokenUrl, redirectUri } = config.sennin;
   res.set("Cache-Control", "no-store");
-  res.json({ sennin: Boolean(clientId && authorizationUrl && tokenUrl && redirectUri) });
+  res.json({
+    sennin: Boolean(clientId && clientSecret && authorizationUrl && tokenUrl && redirectUri),
+    // 仙人アカウントの画面（新規登録・開発者設定）。設定されていれば案内に使う
+    accountUrl: config.senninAccountUrl || null
+  });
 });
+
+// 認可エラー（RFC 6749 §4.1.2.1）の code ごとに、利用者へ分かる文言を返す
+const AUTHORIZE_ERROR_MESSAGES: Record<string, string> = {
+  access_denied: "仙人アカウントでの認証がキャンセルされました。ポイントの利用を許可してください。",
+  invalid_scope: "このアプリにはポイントの利用が許可されていません。仙人アカウントの管理者に確認してください。",
+  invalid_request: "仙人アカウントへの認証リクエストが正しくありません。管理者に確認してください。",
+  unauthorized_client: "このアプリは仙人アカウントで認証を許可されていません。管理者に確認してください。",
+  server_error: "仙人アカウント側でエラーが起きました。時間をおいてお試しください。",
+  temporarily_unavailable: "仙人アカウントが混み合っています。時間をおいてお試しください。"
+};
+
+// ポイントの読み書きが許可されているかを、付与されたスコープで確かめる
+function missingPointScope(grantedScope: unknown): boolean {
+  if (typeof grantedScope !== "string") return false; // 応答に scope が無い場合は、認可画面の結果に任せる
+  const granted = new Set(grantedScope.split(/\s+/).filter(Boolean));
+  return config.sennin.scope
+    .split(/\s+/)
+    .filter((scope) => scope.startsWith("points:"))
+    .some((scope) => !granted.has(scope));
+}
 
 auth.get("/auth/sennin/login", (_req, res) => {
   const { clientId, authorizationUrl, redirectUri, scope } = config.sennin;
@@ -47,7 +71,8 @@ auth.get("/auth/sennin/callback", async (req, res) => {
     res.redirect(`${config.appOrigin}/login?auth_error=${encodeURIComponent(message.slice(0, 180))}`);
   };
   if (typeof req.query.error === "string") {
-    fail("仙人アカウントでの認証がキャンセルされました。ポイントの利用を許可してください。");
+    const reason = req.query.error;
+    fail(AUTHORIZE_ERROR_MESSAGES[reason] ?? "仙人アカウントでの認証に失敗しました。もう一度お試しください。");
     return;
   }
   const code = typeof req.query.code === "string" ? req.query.code : "";
@@ -59,7 +84,9 @@ auth.get("/auth/sennin/callback", async (req, res) => {
   }
   try {
     const tokens = await exchangeCode(code, verifier);
-    if (typeof tokens.refresh_token !== "string") {
+    if (typeof tokens.refresh_token !== "string" || missingPointScope(tokens.scope)) {
+      // 許可されなかったトークンは使わないので、失効させておく
+      if (typeof tokens.refresh_token === "string") await revokeSenninToken(tokens.refresh_token);
       fail("ポイントの利用の許可がありません。仙人アカウントの画面で許可してから、もう一度お試しください。");
       return;
     }
