@@ -25,7 +25,7 @@ export function Login() {
   return (
     <div className="login-page">
       <div className="login-card">
-        <div className="brand-mark large">S</div>
+        <div className="brand-mark large"><img src="/icons/icon-192.png" alt="" /></div>
         <h1>soraapps</h1>
         <p className="muted">拡張機能を探して、追加して、使えます。</p>
         {error && <p className="notice error">{error}</p>}

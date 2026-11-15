@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, errorText } from "../api";
 import { Icon } from "../components/Icon";
+import { PaySheet } from "../components/PaySheet";
 import { Stars, priceLabel } from "../components/Stars";
 import { useSession } from "../session";
-import type { AppCardData, ProductInfo, Review } from "../types";
+import type { AppCardData, Contents, ProductInfo, Review } from "../types";
 
 type Detail = {
   app: AppCardData & { description: string };
@@ -14,9 +15,14 @@ type Detail = {
   reviews: Review[];
   myReview: Review | null;
   canReview: boolean;
+  contents: Contents;
 };
 
-// 拡張機能の詳細（ストアの掲載ページ）。概要・レビューのタブ、追加・購入、開く
+// 注文の番号（同じ確認シートの中で押し直しても、二重に注文しないために使う）
+const newRequestId = () => `ord-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
+// 作品の詳細。種類ごとに、ボタンと概要が変わる
+//  拡張機能：追加・購入 → 開く　／　マンガ・画像・小説：追加・購入 → 読む　／　手渡しグッズ：注文（代金は両者の受け取り確認まで預かる）
 export function AppDetail() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -24,8 +30,10 @@ export function AppDetail() {
   const [data, setData] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"overview" | "reviews">("overview");
-  const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [sheet, setSheet] = useState<"buy" | "order" | null>(null);
+  const [balance, setBalance] = useState<number | null>(null);
+  const orderRequest = useRef<string>(newRequestId());
 
   const load = useCallback(async () => {
     try {
@@ -45,31 +53,49 @@ export function AppDetail() {
 
   const { app } = data;
   const owned = app.owned || data.isCreator;
+  const isGoods = app.kind === "goods";
+  const isReading = app.kind === "image" || app.kind === "manga" || app.kind === "novel";
+  const soldOut = isGoods && app.stock === 0;
+  const listed = app.status === "published";
 
-  const add = async () => {
+  // 支払いの確認シートを開く（残高も読み直す）
+  const openSheet = (kind: "buy" | "order") => {
     if (!me) {
       navigate("/login");
       return;
     }
-    setBusy(true);
     setMessage(null);
-    try {
-      await api(`/api/store/apps/${id}/add`, { method: "POST" });
-      await load();
-      setMessage(app.price === 0 ? "追加しました。マイアプリから開けます。" : `${app.price.toLocaleString("ja-JP")}pt で購入しました。`);
-    } catch (e) {
-      setMessage(errorText(e));
-    } finally {
-      setBusy(false);
-    }
+    if (kind === "order") orderRequest.current = newRequestId();
+    setSheet(kind);
+    api<{ points: number | null }>("/api/balance")
+      .then((d) => setBalance(d.points))
+      .catch(() => setBalance(null));
+  };
+
+  // 無料の追加（支払いなし）・有料の購入（確認シートの「支払う」で呼ぶ）
+  const addApp = async () => {
+    await api(`/api/store/apps/${id}/add`, { method: "POST" });
+    setSheet(null);
+    await load();
+    setMessage(app.price === 0 ? "追加しました。本棚（マイアプリ）から開けます。" : `${app.price.toLocaleString("ja-JP")}pt で購入しました。`);
+  };
+
+  // 手渡しグッズの注文：代金を預かり、取引のページ（DM）へ進む
+  const placeOrder = async () => {
+    const d = await api<{ orderId: string }>(`/api/store/apps/${id}/order`, {
+      method: "POST",
+      json: { requestId: orderRequest.current }
+    });
+    setSheet(null);
+    navigate(`/orders/${d.orderId}`);
   };
 
   const report = async () => {
     if (!me) return navigate("/login");
-    if (!window.confirm("この拡張機能を通報しますか？（1人1回。通報が多いと自動で非公開になります）")) return;
+    if (!window.confirm("この作品を通報しますか？（1人1回。通報が多いと自動で非公開になります）")) return;
     try {
       const d = await api<{ hidden: boolean }>(`/api/store/apps/${id}/report`, { method: "POST" });
-      setMessage(d.hidden ? "通報を受け付けました。この拡張機能は非公開になりました。" : "通報を受け付けました。");
+      setMessage(d.hidden ? "通報を受け付けました。この作品は非公開になりました。" : "通報を受け付けました。");
     } catch (e) {
       setMessage(errorText(e));
     }
@@ -84,57 +110,106 @@ export function AppDetail() {
           {app.thumbUrl ? <img src={app.thumbUrl} alt="" /> : <span>{app.name.slice(0, 1)}</span>}
         </div>
         <div className="detail-info">
+          <span className="kind-chip">{app.kindLabel}</span>
           <h1>{app.name}</h1>
           <Link to={`/authors/${app.creatorId}`} className="link small">{app.creatorName}</Link>
           <div className="detail-meta small">
-            <span>{app.categoryLabel}</span>
-            <Stars value={app.ratingAvg} count={app.ratingCount} />
-            <span className="muted">{app.users.toLocaleString("ja-JP")} 人が利用</span>
+            {app.kind === "extension" ? <Stars value={app.ratingAvg} count={app.ratingCount} /> : null}
+            {isGoods ? <span className="muted">在庫 {app.stock}</span> : <span className="muted">{app.users.toLocaleString("ja-JP")} 人が利用</span>}
           </div>
           {app.status !== "published" && (
             <p className="notice warn">
-              {app.status === "hidden" ? "この拡張機能は非公開です。" : "この拡張機能は作者が公開をやめています。"}
+              {app.status === "hidden" ? "この作品は非公開です。" : "この作品は作者が公開をやめています。"}
               {app.hiddenReason ? `（${app.hiddenReason}）` : ""}
             </p>
           )}
           <div className="detail-actions">
-            {owned ? (
-              <Link to={`/run/${app.id}`} className="btn primary">開く</Link>
+            {data.isCreator ? (
+              <>
+                {isGoods ? <Link to="/orders" className="btn primary pill">注文・取引を見る</Link> : null}
+                <Link to={`/dev/apps/${app.id}/edit`} className="btn ghost pill">編集する</Link>
+              </>
+            ) : isGoods ? (
+              <button type="button" className="btn primary pill big" onClick={() => openSheet("order")} disabled={!listed || soldOut}>
+                {soldOut ? "売り切れ" : `${priceLabel(app.price)}で注文する`}
+              </button>
+            ) : owned ? (
+              <Link to={isReading ? `/read/${app.id}` : `/run/${app.id}`} className="btn primary pill big">
+                {isReading ? "読む" : "開く"}
+              </Link>
             ) : (
-              <button type="button" className="btn primary" onClick={add} disabled={busy || app.status !== "published"}>
-                {busy ? "処理中…" : app.price === 0 ? "追加" : `${priceLabel(app.price)}で購入`}
+              <button
+                type="button"
+                className="btn primary pill big"
+                onClick={() => (app.price === 0 ? addApp().catch((e) => setMessage(errorText(e))) : openSheet("buy"))}
+                disabled={!listed}
+              >
+                {app.price === 0 ? "追加" : `${priceLabel(app.price)}で購入`}
               </button>
             )}
-            {app.owned && <span className="badge ok">追加済み</span>}
+            {app.owned && !isGoods && <span className="badge ok">追加済み</span>}
             {me && !data.isCreator && (
-              <button type="button" className="btn ghost small" onClick={report}>通報</button>
+              <button type="button" className="btn ghost small pill" onClick={report}>通報</button>
             )}
           </div>
           {message && <p className="notice">{message}</p>}
         </div>
       </header>
 
-      <div className="tabs" role="tablist">
-        <button role="tab" aria-selected={tab === "overview"} className={tab === "overview" ? "tab on" : "tab"} onClick={() => setTab("overview")}>概要</button>
-        <button role="tab" aria-selected={tab === "reviews"} className={tab === "reviews" ? "tab on" : "tab"} onClick={() => setTab("reviews")}>
-          レビュー（{app.ratingCount}）
-        </button>
-      </div>
+      {!isGoods && (
+        <div className="tabs" role="tablist">
+          <button role="tab" aria-selected={tab === "overview"} className={tab === "overview" ? "tab on" : "tab"} onClick={() => setTab("overview")}>概要</button>
+          <button role="tab" aria-selected={tab === "reviews"} className={tab === "reviews" ? "tab on" : "tab"} onClick={() => setTab("reviews")}>
+            レビュー（{app.ratingCount}）
+          </button>
+        </div>
+      )}
 
-      {tab === "overview" ? (
+      {tab === "overview" || isGoods ? (
         <>
-          {data.images.length > 0 && (
-            <Gallery images={data.images} name={app.name} />
-          )}
+          {data.images.length > 0 && <Gallery images={data.images} name={app.name} />}
           <section className="prose">
-          <p>{app.description || "説明はありません。"}</p>
-          <dl className="facts small">
-            <dt>カテゴリ</dt><dd>{app.categoryLabel}</dd>
-            <dt>価格</dt><dd>{priceLabel(app.price)}</dd>
-            <dt>更新</dt><dd>{new Date(app.editedAt ?? app.createdAt).toLocaleDateString("ja-JP")}</dd>
-          </dl>
+            <p>{app.description || "説明はありません。"}</p>
+
+            {app.kind === "novel" && data.contents.chapters.length > 0 && (
+              <div className="toc">
+                <h2 className="section-title">目次（{data.contents.chapters.length}章）</h2>
+                <ol>
+                  {data.contents.chapters.map((c) => (
+                    <li key={c.index}>{c.title}</li>
+                  ))}
+                </ol>
+                <p className="small muted">本文は、購入した人が読めます。</p>
+              </div>
+            )}
+
+            {(app.kind === "manga" || app.kind === "image") && (
+              <p className="small muted">全 {data.contents.pageCount} ページ。購入した人が、ページ順に読めます。</p>
+            )}
+
+            {isGoods && (
+              <div className="handover-card">
+                <h2 className="section-title">手渡しで受け渡します</h2>
+                <p className="small">
+                  注文すると、出品者とのDMで受け渡しの日時と場所を相談できます。
+                  <strong>購入者と出品者の両方が「受け取り済み」にしたときだけ、作者へ入金されます。</strong>
+                  それまでは代金を預かり、確認前ならキャンセルして返金できます。
+                </p>
+                {app.handoverNote && (
+                  <p className="small"><span className="muted">受け渡しの目安：</span>{app.handoverNote}</p>
+                )}
+              </div>
+            )}
+
+            <dl className="facts small">
+              <dt>種類</dt><dd>{app.kindLabel}</dd>
+              {app.kind === "extension" && (<><dt>カテゴリ</dt><dd>{app.categoryLabel}</dd></>)}
+              <dt>価格</dt><dd>{priceLabel(app.price)}</dd>
+              <dt>更新</dt><dd>{new Date(app.editedAt ?? app.createdAt).toLocaleDateString("ja-JP")}</dd>
+            </dl>
           </section>
-          {data.products.length > 0 && (
+
+          {app.kind === "extension" && data.products.length > 0 && (
             <section className="products">
               <h2 className="section-title">アプリ内で買えるもの</h2>
               <p className="small muted">購入は、拡張機能の中から行います。買った商品は、アプリが「持っている」と判断できます。</p>
@@ -157,6 +232,31 @@ export function AppDetail() {
         </>
       ) : (
         <ReviewsPanel detail={data} appId={id} onChanged={load} />
+      )}
+
+      {sheet === "buy" && (
+        <PaySheet
+          open
+          title={app.name}
+          amount={app.price}
+          balance={balance}
+          note="購入すると本棚に入り、いつでも使えます。"
+          actionLabel="支払う"
+          onConfirm={addApp}
+          onClose={() => setSheet(null)}
+        />
+      )}
+      {sheet === "order" && (
+        <PaySheet
+          open
+          title={`${app.name} を注文`}
+          amount={app.price}
+          balance={balance}
+          note="代金は、両者が受け取り済みにするまで預かります。受け渡しはDMで相談します。"
+          actionLabel="注文して支払う"
+          onConfirm={placeOrder}
+          onClose={() => setSheet(null)}
+        />
       )}
     </div>
   );
@@ -210,12 +310,12 @@ function ReviewsPanel({ detail, appId, onChanged }: { detail: Detail; appId: str
           />
           {error && <p className="notice error">{error}</p>}
           <div className="row">
-            <button type="button" className="btn primary small" onClick={save}>{detail.myReview ? "直す" : "投稿"}</button>
-            {detail.myReview && <button type="button" className="btn ghost small" onClick={remove}>削除</button>}
+            <button type="button" className="btn primary small pill" onClick={save}>{detail.myReview ? "直す" : "投稿"}</button>
+            {detail.myReview && <button type="button" className="btn ghost small pill" onClick={remove}>削除</button>}
           </div>
         </div>
       )}
-      {!detail.canReview && !detail.isCreator && <p className="muted small">レビューは、この拡張機能を追加した人が付けられます。</p>}
+      {!detail.canReview && !detail.isCreator && <p className="muted small">レビューは、この作品を追加した人が付けられます。</p>}
       {error && !detail.canReview && <p className="notice error">{error}</p>}
       <ul className="review-list">
         {detail.reviews.map((r, i) => (
@@ -238,7 +338,7 @@ function ReviewsPanel({ detail, appId, onChanged }: { detail: Detail; appId: str
 function Gallery({ images, name }: { images: string[]; name: string }) {
   const [open, setOpen] = useState<number | null>(null);
   return (
-    <section className="gallery" aria-label="商品紹介画像">
+    <section className="gallery" aria-label="紹介画像">
       {images.map((src, i) => (
         <button key={src} type="button" className="shot" onClick={() => setOpen(i)} aria-label={`${name} の画像 ${i + 1}`}>
           <img src={src} alt="" loading="lazy" />

@@ -360,3 +360,121 @@ ${js}
 </body>
 </html>`;
 }
+
+// ---------- 種類：拡張機能・画像・マンガ・小説・手渡しグッズ ----------
+
+export const KINDS = ["extension", "image", "manga", "novel", "goods"] as const;
+export type Kind = (typeof KINDS)[number];
+export const KIND_LABEL: Record<Kind, string> = {
+  extension: "拡張機能",
+  image: "画像",
+  manga: "マンガ",
+  novel: "小説",
+  goods: "手渡しグッズ"
+};
+export const isKind = (value: unknown): value is Kind => (KINDS as readonly unknown[]).includes(value);
+
+export const PAGE_MAX_BYTES = 10 * 1024 * 1024; // 1ページ 10MB まで
+export const PAGES_MAX = 200; // 画像・マンガのページ数
+export const CHAPTERS_MAX = 300; // 小説の章の数
+export const CHAPTER_TITLE_MAX = 40;
+export const CHAPTER_BODY_MAX = 20_000; // 1章の文字数
+export const CONTENT_TEXT_MAX = 300_000; // 小説全体の文字数
+export const STOCK_MAX = 99; // 手渡しグッズの在庫の上限
+export const HANDOVER_NOTE_MAX = 200; // 受け渡しの目安（場所・時間の目安。連絡先は書けない）
+export const ORDER_MESSAGE_MAX = 500;
+export const ORDER_MESSAGES_PER_MINUTE = 20; // DM の送信の上限（1人・1分）
+
+export function checkKind(value: unknown): string | null {
+  return isKind(value) ? null : "種類を選んでください。";
+}
+
+// 在庫は 0〜99 の整数（0 は売り切れ）
+export function checkStock(value: unknown): string | null {
+  const n = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  if (typeof n !== "number" || !Number.isInteger(n) || n < 0 || n > STOCK_MAX) {
+    return `在庫は 0〜${STOCK_MAX} の整数で入力してください。`;
+  }
+  return null;
+}
+
+// 手渡しグッズの価格は、0（無料）にできない。10〜1000pt
+export function checkGoodsPrice(value: unknown): string | null {
+  const error = checkPrice(value);
+  if (error) return error;
+  const n = Number(value);
+  if (!(n >= PRICE_MIN && n <= PRICE_MAX)) return `手渡しグッズの価格は ${PRICE_MIN}〜${PRICE_MAX}pt にしてください。`;
+  return null;
+}
+
+export function checkHandoverNote(text: string): string | null {
+  if (text.length > HANDOVER_NOTE_MAX) return `受け渡しの目安は${HANDOVER_NOTE_MAX}文字以内にしてください。`;
+  return checkText(text, "受け渡しの目安");
+}
+
+export type ChapterInput = { title: string; body: string };
+
+// 小説の章（JSON の文字列か配列）を検査する
+export function checkChapters(raw: unknown): { ok: true; items: ChapterInput[] } | { ok: false; error: string } {
+  let list: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      list = JSON.parse(raw);
+    } catch {
+      return { ok: false, error: "章の形式が正しくありません。" };
+    }
+  }
+  if (!Array.isArray(list)) return { ok: false, error: "章の形式が正しくありません。" };
+  if (list.length === 0) return { ok: false, error: "章を1つ以上入力してください。" };
+  if (list.length > CHAPTERS_MAX) return { ok: false, error: `章は${CHAPTERS_MAX}個までです。` };
+
+  const items: ChapterInput[] = [];
+  let total = 0;
+  for (const [i, item] of list.entries()) {
+    const v = (item ?? {}) as Record<string, unknown>;
+    const title = typeof v.title === "string" ? v.title.trim() : "";
+    const body = typeof v.body === "string" ? v.body.replace(/\r\n/g, "\n").trim() : "";
+    const label = `${i + 1}章`;
+    if (!title || title.length > CHAPTER_TITLE_MAX) return { ok: false, error: `${label}: 章のタイトルは1〜${CHAPTER_TITLE_MAX}文字で入力してください。` };
+    if (!body) return { ok: false, error: `${label}: 本文を入力してください。` };
+    if (body.length > CHAPTER_BODY_MAX) return { ok: false, error: `${label}: 本文は${CHAPTER_BODY_MAX.toLocaleString("ja-JP")}文字までです。` };
+    const textError = checkText(`${title}\n${body}`, label);
+    if (textError) return { ok: false, error: textError };
+    total += title.length + body.length;
+    items.push({ title, body });
+  }
+  if (total > CONTENT_TEXT_MAX) {
+    return { ok: false, error: `小説の本文は合わせて${CONTENT_TEXT_MAX.toLocaleString("ja-JP")}文字までです。` };
+  }
+  return { ok: true, items };
+}
+
+// ページ画像（画像・マンガ）：枚数・形式・1枚のサイズ
+export function checkPages(files: Array<{ buffer: Buffer }>): string | null {
+  if (files.length === 0) return "ページ画像を1枚以上選んでください。";
+  if (files.length > PAGES_MAX) return `ページは${PAGES_MAX}枚までです。`;
+  for (const [i, file] of files.entries()) {
+    if (file.buffer.length > PAGE_MAX_BYTES) return `${i + 1}ページ目: 1枚10MB以下にしてください。`;
+    if (!sniffImage(file.buffer)) return `${i + 1}ページ目: PNG・JPEG・GIF・WebP の画像にしてください。`;
+  }
+  return null;
+}
+
+export function checkOrderRequest(body: unknown): { ok: true; requestId: string } | { ok: false; error: string } {
+  const v = (body ?? {}) as Record<string, unknown>;
+  const requestId = typeof v.requestId === "string" ? v.requestId : "";
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(requestId)) {
+    return { ok: false, error: "注文の番号（requestId）が正しくありません。" };
+  }
+  return { ok: true, requestId };
+}
+
+// DM の本文：空でない・文字数・外部への連絡先（URL・メール・電話番号）と禁止語を止める
+export function checkOrderMessage(value: unknown): { ok: true; body: string } | { ok: false; error: string } {
+  const body = typeof value === "string" ? value.trim() : "";
+  if (!body) return { ok: false, error: "メッセージを入力してください。" };
+  if (body.length > ORDER_MESSAGE_MAX) return { ok: false, error: `メッセージは${ORDER_MESSAGE_MAX}文字以内にしてください。` };
+  const error = checkText(body, "メッセージ");
+  if (error) return { ok: false, error };
+  return { ok: true, body };
+}

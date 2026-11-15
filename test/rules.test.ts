@@ -9,8 +9,16 @@ import {
   checkCode,
   checkPrice,
   checkProducts,
+  checkChapters,
+  checkGoodsPrice,
+  checkHandoverNote,
+  checkKind,
+  checkOrderMessage,
+  checkOrderRequest,
+  checkPages,
   checkShots,
   checkSku,
+  checkStock,
   checkStorageKey,
   checkStorageValue,
   checkText,
@@ -155,6 +163,58 @@ test("商品紹介画像は5枚まで・画像だけ", () => {
   assert.equal(checkShots([{ buffer: png(10, 10) }, { buffer: png(20, 20) }]), null);
   assert.match(checkShots(Array.from({ length: 6 }, () => ({ buffer: png(1, 1) }))) ?? "", /5 枚/);
   assert.match(checkShots([{ buffer: Buffer.from("text file that is not an image......") }]) ?? "", /紹介画像/);
+});
+
+test("種類は5つだけ（拡張機能・画像・マンガ・小説・手渡しグッズ）", () => {
+  for (const k of ["extension", "image", "manga", "novel", "goods"]) assert.equal(checkKind(k), null);
+  assert.ok(checkKind("video"));
+  assert.ok(checkKind(undefined));
+});
+
+test("在庫は 0〜99 の整数。手渡しグッズの価格は 10〜1000pt（0 は不可）", () => {
+  assert.equal(checkStock("0"), null);
+  assert.equal(checkStock(99), null);
+  assert.ok(checkStock(100));
+  assert.ok(checkStock(-1));
+  assert.ok(checkStock(""));
+  assert.equal(checkGoodsPrice("500"), null);
+  assert.ok(checkGoodsPrice("0"));
+  assert.ok(checkGoodsPrice("5"));
+  assert.ok(checkGoodsPrice("1001"));
+});
+
+test("受け渡しの目安は連絡先（URL・電話番号）を書けない", () => {
+  assert.equal(checkHandoverNote("渋谷駅の改札前、土曜の15時頃"), null);
+  assert.ok(checkHandoverNote("詳しくはexample.comで"));
+  assert.ok(checkHandoverNote("090-1234-5678 まで"));
+  assert.ok(checkHandoverNote("x".repeat(201)));
+});
+
+test("小説の章：タイトル必須・本文必須・JSON の形式・URL を止める", () => {
+  const ok = checkChapters(JSON.stringify([{ title: "第一章", body: "昔々、ある所に。" }]));
+  assert.equal(ok.ok, true);
+  assert.equal(checkChapters("[]").ok, false);
+  assert.equal(checkChapters("not json").ok, false);
+  assert.equal(checkChapters([{ title: "", body: "本文" }]).ok, false);
+  assert.equal(checkChapters([{ title: "題", body: "" }]).ok, false);
+  const link = checkChapters([{ title: "題", body: "詳しくは https://example.com を見て" }]);
+  assert.equal(link.ok, false);
+});
+
+test("ページ画像：画像だけ・1枚以上・200枚まで", () => {
+  assert.equal(checkPages([{ buffer: png(10, 10) }]), null);
+  assert.ok(checkPages([]));
+  assert.match(checkPages([{ buffer: Buffer.from("not an image at all") }]) ?? "", /PNG/);
+  assert.match(checkPages(Array.from({ length: 201 }, () => ({ buffer: png(1, 1) }))) ?? "", /200/);
+});
+
+test("注文の番号・DM の本文（空・長さ・連絡先を止める）", () => {
+  assert.equal(checkOrderRequest({ requestId: "order-20260101-abc" }).ok, true);
+  assert.equal(checkOrderRequest({ requestId: "short" }).ok, false);
+  assert.equal(checkOrderMessage("明日の15時、駅前でいいですか？").ok, true);
+  assert.equal(checkOrderMessage("   ").ok, false);
+  assert.equal(checkOrderMessage("x".repeat(501)).ok, false);
+  assert.equal(checkOrderMessage("LINEは test@example.com").ok, false);
 });
 
 for (const [name, fn] of cases) {

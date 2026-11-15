@@ -9,6 +9,7 @@ type DevData = {
   suspendedReason: string | null;
   earned: number;
   pending: number;
+  escrow: number;
   apps: AppCardData[];
 };
 
@@ -54,7 +55,7 @@ export function Dev() {
       <div className="toolbar">
         <h1 className="page-title">開発者ダッシュボード</h1>
         <button type="button" className="btn primary" onClick={() => navigate("/dev/new")} disabled={data?.suspended}>
-          新しい拡張機能を公開
+          新しい作品を公開
         </button>
       </div>
 
@@ -76,13 +77,14 @@ export function Dev() {
             <div className="stat"><span className="muted small">利用者（合計）</span><strong>{data.apps.reduce((s, a) => s + a.users, 0).toLocaleString("ja-JP")}</strong></div>
             <div className="stat"><span className="muted small">受け取った pt</span><strong>{data.earned.toLocaleString("ja-JP")}</strong></div>
             <div className="stat"><span className="muted small">保留中の pt</span><strong>{data.pending.toLocaleString("ja-JP")}</strong></div>
+            <div className="stat"><span className="muted small">預かり中の pt（手渡し）</span><strong>{data.escrow.toLocaleString("ja-JP")}</strong></div>
           </div>
           <p className="small muted">
-            売上は購入額の全額が、作者の仙人アカウントに入ります（手数料はありません）。保留中の分は、次にこの画面を開いたときに払い直します。
+            売上は購入額の全額が、作者の仙人アカウントに入ります（手数料はありません）。手渡しの注文は、購入者と作者の両方が「受け取り済み」にするまで預かり、そのあとで入金されます。
           </p>
 
           {data.apps.length === 0 ? (
-            <p className="muted pad">まだ拡張機能がありません。「新しい拡張機能を公開」から作れます。</p>
+            <p className="muted pad">まだ拡張機能がありません。「新しい作品を公開」から作れます。</p>
           ) : (
             <div className="table-wrap">
               <table className="table">
@@ -102,6 +104,7 @@ export function Dev() {
                     <tr key={a.id}>
                       <td>
                         <Link to={`/apps/${a.id}`} className="link">{a.name}</Link>
+                        <div><span className="kind-chip">{a.kindLabel}</span></div>
                         {a.hiddenReason && <div className="small muted">{a.hiddenReason}</div>}
                       </td>
                       <td>

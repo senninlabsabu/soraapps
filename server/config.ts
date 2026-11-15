@@ -15,8 +15,29 @@ const need = (name: string): string => {
   return value;
 };
 
-// 仙人アカウントの場所（例: https://account.example.com）。末尾のスラッシュは取り除く
-const senninBase = env("SENNIN_BASE_URL").replace(/\/+$/, "");
+// URL を絶対URLに直す。https:// が無いと、リダイレクト先が相対URLとして解釈され、
+// 例えば /api/auth/sennin/soraapps.onrender.com/ のような別の場所へ飛んでしまう。
+// 先頭の http(s):// が無い場合は補う（localhost だけは http）。補ったときは起動時に警告する。
+function absoluteUrl(name: string, raw: string): string {
+  if (!raw) return "";
+  let value = /^https?:\/\//i.test(raw) ? raw : `${/^(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(raw) ? "http" : "https"}://${raw}`;
+  if (value !== raw) console.warn(`[config] ${name} に https:// が無かったため補いました（${value}）。設定を確認してください。`);
+  try {
+    return new URL(value).origin;
+  } catch {
+    throw new Error(`${name} の値が URL になっていません: ${raw}`);
+  }
+}
+
+// リダイレクトURIは、パスまで含めて完全一致で照合されるので、パスは変えない
+function absoluteRedirect(name: string, raw: string): string {
+  const origin = absoluteUrl(name, raw); // 警告はここで1回だけ出る
+  const path = raw.replace(/^(https?:\/\/)?[^/]*/i, ""); // ホストより後ろ（パス）はそのまま残す
+  return `${origin}${path}`;
+}
+
+// 仙人アカウントの場所（例: https://sennin-account-api.xianrendesu.workers.dev）。末尾のスラッシュは取り除く
+const senninBase = absoluteUrl("SENNIN_BASE_URL", env("SENNIN_BASE_URL").replace(/\/+$/, ""));
 const senninUrl = (override: string, path: string) => (override ? override : senninBase ? `${senninBase}${path}` : "");
 const apiUrl = (path: string, tokenUrl: string) => {
   try {
@@ -29,10 +50,11 @@ const apiUrl = (path: string, tokenUrl: string) => {
 const tokenUrl = senninUrl(env("SENNIN_TOKEN_URL"), "/oauth/token");
 
 // 仙人アカウントの画面（GAS）。開発者設定（アプリの登録）や新規登録の案内に使う。API には使わない
-const senninAccountUrl = env("SENNIN_ACCOUNT_URL").replace(/\/+$/, "");
+const senninAccountUrl = absoluteUrl("SENNIN_ACCOUNT_URL", env("SENNIN_ACCOUNT_URL").replace(/\/+$/, ""));
 
 // このアプリ自身のURL（仙人アカウントから戻ったあとの飛び先）
-const appOrigin = (env("APP_ORIGIN") || "http://localhost:5173").replace(/\/+$/, "");
+// このアプリの公開URL（例: https://soraapps.onrender.com）。ここから、仙人アカウントの戻り先とリダイレクトを作る
+const appOrigin = absoluteUrl("APP_ORIGIN", env("APP_ORIGIN") || "http://localhost:5173");
 
 // ポイントの読み書きを含む許可。ログインのときに一緒に求める（ポイントの支払い・配布に必要）
 // points:write は仙人アカウント側の管理者の承認が必要です
@@ -54,7 +76,9 @@ export const config = {
   sennin: {
     clientId: env("SENNIN_CLIENT_ID"),
     clientSecret: env("SENNIN_CLIENT_SECRET"),
-    redirectUri: env("SENNIN_REDIRECT_URI") || `${appOrigin}/api/auth/sennin/callback`,
+    redirectUri: env("SENNIN_REDIRECT_URI")
+      ? absoluteRedirect("SENNIN_REDIRECT_URI", env("SENNIN_REDIRECT_URI"))
+      : `${appOrigin}/api/auth/sennin/callback`,
     authorizationUrl: senninUrl(env("SENNIN_AUTHORIZATION_URL"), "/oauth/authorize"),
     tokenUrl,
     revokeUrl: senninUrl(env("SENNIN_REVOKE_URL"), "/oauth/revoke"),

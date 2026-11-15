@@ -324,3 +324,86 @@ create table if not exists public.sa_featured (
 );
 create index if not exists sa_featured_position_idx on public.sa_featured(position, created_at);
 alter table public.sa_featured enable row level security;
+
+-- ============ 追加：マンガ・画像・小説・手渡しグッズ・注文（エスクロー）・DM ============
+
+-- 作品の種類（拡張機能・画像・マンガ・小説・手渡しグッズ）。既存の作品は拡張機能のまま
+alter table public.sa_apps add column if not exists kind text not null default 'extension';
+alter table public.sa_apps drop constraint if exists sa_apps_kind_check;
+alter table public.sa_apps add constraint sa_apps_kind_check
+  check (kind in ('extension', 'image', 'manga', 'novel', 'goods'));
+
+-- 手渡しグッズの在庫（0 は売り切れ）と、受け渡しの目安（場所・時間の目安。連絡先は書けない）
+alter table public.sa_apps add column if not exists stock integer not null default 1;
+alter table public.sa_apps drop constraint if exists sa_apps_stock_check;
+alter table public.sa_apps add constraint sa_apps_stock_check check (stock between 0 and 99);
+alter table public.sa_apps add column if not exists handover_note text not null default '';
+alter table public.sa_apps drop constraint if exists sa_apps_handover_note_check;
+alter table public.sa_apps add constraint sa_apps_handover_note_check check (char_length(handover_note) <= 200);
+
+-- 画像・マンガのページ（画像の中身は Turso の sa_blobs。公開せず、購入した人だけに配る）
+create table if not exists public.sa_content_pages (
+  app_id uuid not null references public.sa_apps(id) on delete cascade,
+  position integer not null check (position >= 0),
+  blob_id text not null,
+  primary key (app_id, position)
+);
+
+-- 小説の章（本文は購入した人だけに配る）
+create table if not exists public.sa_content_chapters (
+  app_id uuid not null references public.sa_apps(id) on delete cascade,
+  position integer not null check (position >= 0),
+  title text not null check (char_length(title) between 1 and 40),
+  body text not null check (char_length(body) between 1 and 20000),
+  primary key (app_id, position)
+);
+
+-- 注文（手渡しグッズ）。代金は受け取り確認が両者そろうまで作者へ入金しない（エスクロー）
+--   pending_payment：在庫を確保した。代金の支払い中
+--   open           ：代金を預かった。受け渡しの相談・確認の段階
+--   completed      ：両者が受け取り済みにした。作者へ入金済み（sa_app_payouts）
+--   cancelled      ：キャンセル。預かった代金は refunded_at の時点で返金済み
+create table if not exists public.sa_orders (
+  id uuid primary key default gen_random_uuid(),
+  request_id text not null,
+  app_id uuid not null references public.sa_apps(id) on delete cascade,
+  buyer_id uuid not null references public.sa_users(id) on delete cascade,
+  seller_id uuid not null references public.sa_users(id) on delete cascade,
+  amount integer not null check (amount between 10 and 1000),
+  status text not null default 'pending_payment'
+    check (status in ('pending_payment', 'open', 'completed', 'cancelled')),
+  purchase_id uuid references public.sa_app_purchases(id) on delete set null,
+  paid_at timestamptz,
+  buyer_received_at timestamptz,
+  seller_handed_at timestamptz,
+  completed_at timestamptz,
+  cancelled_at timestamptz,
+  cancelled_by text check (cancelled_by in ('buyer', 'seller')),
+  refunded_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (buyer_id, request_id)
+);
+create index if not exists sa_orders_buyer_idx on public.sa_orders(buyer_id, created_at desc);
+create index if not exists sa_orders_seller_idx on public.sa_orders(seller_id, created_at desc);
+
+-- 注文ごとのDM（購入者と出品者だけが読み書きする）
+create table if not exists public.sa_order_messages (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references public.sa_orders(id) on delete cascade,
+  sender_id uuid not null references public.sa_users(id) on delete cascade,
+  body text not null check (char_length(body) between 1 and 500),
+  created_at timestamptz not null default now()
+);
+create index if not exists sa_order_messages_idx on public.sa_order_messages(order_id, created_at);
+create index if not exists sa_order_messages_sender_idx on public.sa_order_messages(sender_id, created_at);
+
+-- 支払いの種類に「注文（order）」を加える
+alter table public.sa_app_purchases drop constraint if exists sa_app_purchases_kind_check;
+alter table public.sa_app_purchases
+  add constraint sa_app_purchases_kind_check check (kind in ('purchase', 'charge', 'iap', 'order'));
+
+alter table public.sa_content_pages enable row level security;
+alter table public.sa_content_chapters enable row level security;
+alter table public.sa_orders enable row level security;
+alter table public.sa_order_messages enable row level security;

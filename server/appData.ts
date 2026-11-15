@@ -1,12 +1,12 @@
 // アプリ（拡張機能）の読み込みと、一覧に出す値の集計（評価・購入者数・持っているかどうか）。
 import { sb } from "./supabase.js";
-import { CATEGORY_LABEL, type Category } from "./rules.js";
+import { CATEGORY_LABEL, KIND_LABEL, type Category, type Kind } from "./rules.js";
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // コード（html/css/js）は含めない。コードは作者と買った人だけが、別の API で読む
 export const APP_COLUMNS =
-  "id, creator_id, name, description, category, price, status, hidden_reason, thumb_url, created_at, edited_at, creator:sa_users!creator_id(display_name)";
+  "id, creator_id, name, description, category, kind, price, stock, handover_note, status, hidden_reason, thumb_url, created_at, edited_at, creator:sa_users!creator_id(display_name)";
 
 export type AppRow = {
   id: string;
@@ -14,7 +14,10 @@ export type AppRow = {
   name: string;
   description: string;
   category: Category;
+  kind: Kind;
   price: number;
+  stock: number;
+  handover_note: string;
   status: "published" | "hidden" | "deleted";
   hidden_reason: string | null;
   thumb_url: string | null;
@@ -55,6 +58,10 @@ export type Card = {
   description: string;
   category: Category;
   categoryLabel: string;
+  kind: Kind;
+  kindLabel: string;
+  stock: number;
+  handoverNote: string;
   price: number;
   creatorId: string;
   creatorName: string;
@@ -102,6 +109,10 @@ export async function toCards(rows: AppRow[], me: string | null): Promise<Card[]
       description: row.description,
       category: row.category,
       categoryLabel: CATEGORY_LABEL[row.category],
+      kind: row.kind,
+      kindLabel: KIND_LABEL[row.kind],
+      stock: row.stock,
+      handoverNote: row.handover_note,
       price: row.price,
       creatorId: row.creator_id,
       creatorName: row.creator?.display_name ?? "作者",

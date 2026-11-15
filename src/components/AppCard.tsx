@@ -3,8 +3,9 @@ import type { ReactNode } from "react";
 import type { AppCardData } from "../types";
 import { Stars, priceLabel } from "./Stars";
 
-// アプリのカード（一覧・棚・マイアプリで共通）
+// 作品のカード（一覧・棚・マイアプリで共通）。種類ごとに、リンク先と見出しを少し変える
 export function AppCard({ app, action }: { app: AppCardData; action?: ReactNode }) {
+  const soldOut = app.kind === "goods" && app.stock === 0;
   return (
     <article className="app-card">
       <Link to={`/apps/${app.id}`} className="app-card-link" aria-label={app.name}>
@@ -14,14 +15,20 @@ export function AppCard({ app, action }: { app: AppCardData; action?: ReactNode 
         <div className="app-card-body">
           <h3 className="app-name">{app.name}</h3>
           <div className="app-author muted small">{app.creatorName}</div>
-          <Stars value={app.ratingAvg} count={app.ratingCount} />
+          {app.kind === "extension" ? <Stars value={app.ratingAvg} count={app.ratingCount} /> : null}
           <div className="app-meta small muted">
-            <span>{app.categoryLabel}</span>
-            <span>・</span>
-            <span>{app.users.toLocaleString("ja-JP")} 人が利用</span>
+            <span className="kind-chip">{app.kindLabel}</span>
+            {app.kind === "extension" ? <span>{app.categoryLabel}</span> : null}
+            {app.kind === "goods" ? <span>在庫 {app.stock}</span> : <span>{app.users.toLocaleString("ja-JP")} 人が利用</span>}
           </div>
           <div className="app-price">
-            {app.owned ? <span className="badge ok">追加済み</span> : <span className={app.price === 0 ? "badge free" : "badge"}>{priceLabel(app.price)}</span>}
+            {app.owned ? (
+              <span className="badge ok">追加済み</span>
+            ) : soldOut ? (
+              <span className="badge warn">売り切れ</span>
+            ) : (
+              <span className={app.price === 0 ? "badge free" : "badge"}>{priceLabel(app.price)}</span>
+            )}
           </div>
         </div>
       </Link>

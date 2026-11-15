@@ -11,6 +11,8 @@ import { store } from "./store.js";
 import { dev } from "./dev.js";
 import { run } from "./run.js";
 import { admin } from "./admin.js";
+import { orders } from "./orders.js";
+import { content } from "./content.js";
 import { images } from "./images.js";
 import { sendError } from "./errors.js";
 
@@ -32,6 +34,8 @@ app.use("/api", store);
 app.use("/api", dev);
 app.use("/api", run);
 app.use("/api", admin);
+app.use("/api", orders);
+app.use("/api", content);
 app.use("/api", (_req, res) => {
   res.status(404).json({ ok: false, error: "見つかりません。" });
 });

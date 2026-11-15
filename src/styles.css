@@ -88,9 +88,11 @@ textarea { resize: vertical; }
 .brand:hover { text-decoration: none; }
 .brand-mark {
   display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 8px;
-  background: linear-gradient(135deg, #4285f4, #1a73e8); color: #fff; font-weight: 700; font-size: 18px;
+  background: transparent; color: #fff; font-weight: 700; font-size: 18px;
 }
 .brand-mark.large { width: 56px; height: 56px; font-size: 28px; margin: 0 auto; }
+.brand-mark img { display: block; width: 100%; height: 100%; object-fit: contain; border-radius: inherit; }
+.brand-mark.large img { width: 100%; height: 100%; }
 .brand-name { font-size: 20px; font-weight: 500; }
 .search {
   position: relative; flex: 1; max-width: 680px; display: flex; align-items: center;
@@ -315,4 +317,327 @@ textarea { resize: vertical; }
   .search-icon { display: none; }
   .topbar { overflow: visible; }
   .featured-tile { width: 270px; }
+}
+
+/* =====================================================================
+   Google Pay 風のテーマ（白基調・大きな角丸・ピル型のボタン・金額を大きく）
+   既存のクラスを上書きして、作品の種類（マンガ・小説・手渡し）の画面も同じ見た目にそろえる
+   ===================================================================== */
+:root {
+  --radius: 16px;
+  --radius-lg: 24px;
+  --card-shadow: 0 1px 2px rgba(60, 64, 67, .14), 0 2px 8px rgba(60, 64, 67, .08);
+  --pay-blue: #1a73e8;
+  --pay-blue-deep: #174ea6;
+  --pay-surface: #ffffff;
+  --pay-soft: #f1f3f4;
+  font-family: "Google Sans", Roboto, "Hiragino Sans", "Noto Sans JP", system-ui, -apple-system, sans-serif;
+}
+
+.topbar {
+  background: #fff;
+  border-bottom: 1px solid #eceef1;
+  height: 64px;
+}
+.brand-name { font-size: 20px; letter-spacing: .2px; }
+.points-chip {
+  background: #e8f0fe; color: var(--pay-blue-deep); border-radius: 999px; padding: 6px 14px;
+  font-weight: 500; text-decoration: none; font-size: 14px;
+}
+.points-chip:hover { background: #d2e3fc; text-decoration: none; }
+
+.sidebar {
+  background: #fff;
+  border-right: 1px solid #eceef1;
+  padding: 12px 10px;
+}
+.nav-item { border-radius: 0 999px 999px 0; padding: 10px 18px; font-size: 14px; }
+.nav-item.active { background: #e8f0fe; color: var(--pay-blue-deep); font-weight: 500; }
+.nav-heading { font-size: 12px; letter-spacing: .4px; }
+
+.content { padding: 28px 36px 96px; }
+.store h1, .page-title { font-size: 26px; font-weight: 500; }
+
+/* ボタン：ピル型。主なボタンは大きく */
+.btn { border-radius: 999px; padding: 10px 22px; }
+.btn.primary { box-shadow: 0 1px 2px rgba(26, 115, 232, .3); }
+.btn.big { padding: 14px 28px; font-size: 16px; }
+.btn.block { width: 100%; }
+.btn.pill { border-radius: 999px; }
+.btn.danger { color: var(--danger); border-color: #f1b7b3; }
+
+.card, .app-card, .pay-card, .wallet-card, .editor-card, .handover-card {
+  background: var(--pay-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--card-shadow);
+}
+.app-card { border-radius: var(--radius-lg); border: 0; overflow: hidden; }
+.app-card:hover { box-shadow: 0 1px 3px rgba(60, 64, 67, .22), 0 6px 18px rgba(60, 64, 67, .12); }
+.app-thumb { border-radius: var(--radius); }
+.app-name { font-size: 15px; font-weight: 500; }
+.badge { border-radius: 999px; padding: 3px 10px; }
+
+.kind-chip {
+  display: inline-block; font-size: 12px; background: #f1f3f4; color: #3c4043;
+  border-radius: 999px; padding: 2px 9px; margin-right: 6px;
+}
+
+/* 作品の種類のタイル（ストアのホーム） */
+.kind-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin: 20px 0 8px; }
+.kind-tile {
+  display: flex; flex-direction: column; gap: 6px; padding: 16px; border-radius: var(--radius-lg);
+  background: #fff; box-shadow: var(--card-shadow); color: var(--text); text-decoration: none;
+}
+.kind-tile:hover { text-decoration: none; box-shadow: 0 1px 3px rgba(60, 64, 67, .22), 0 6px 18px rgba(60, 64, 67, .12); }
+.kind-tile-name { font-size: 16px; font-weight: 500; color: var(--pay-blue-deep); }
+
+/* 詳細 */
+.detail-head { gap: 28px; }
+.detail-thumb { border-radius: var(--radius-lg); box-shadow: var(--card-shadow); }
+.detail h1 { font-size: 28px; font-weight: 500; }
+.detail-actions { gap: 12px; }
+.handover-card, .toc { background: #fff; border-radius: var(--radius); padding: 16px 20px; margin: 12px 0; box-shadow: var(--card-shadow); }
+.toc ol { padding-left: 1.4em; margin: 8px 0; line-height: 1.9; }
+
+/* 支払いの確認シート（下から出る） */
+.sheet-backdrop { background: rgba(32, 33, 36, .4); animation: fadeIn .18s ease; }
+.pay-sheet {
+  width: min(480px, 100vw); background: #fff; border-radius: 28px 28px 0 0;
+  padding: 10px 24px calc(24px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, .18); animation: sheetUp .26s cubic-bezier(.2, .8, .2, 1);
+}
+.sheet-grab { width: 40px; height: 4px; border-radius: 4px; background: #dadce0; margin: 0 auto 10px; }
+.pay-sheet-head { display: flex; align-items: center; justify-content: space-between; }
+.pay-sheet-title { font-size: 16px; font-weight: 500; }
+.pay-amount-big { font-size: 40px; font-weight: 500; margin: 12px 0 4px; letter-spacing: -.5px; }
+.pay-amount-big span { font-size: 18px; color: var(--muted); }
+.pay-note { font-size: 13px; color: var(--muted); line-height: 1.7; margin: 6px 0 14px; }
+.pay-method {
+  display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: var(--radius);
+  background: var(--pay-soft); margin-bottom: 16px;
+}
+.pay-method-body { display: flex; flex-direction: column; flex: 1; }
+.pay-method-icon {
+  width: 40px; height: 40px; border-radius: 50%; background: var(--pay-blue); color: #fff;
+  display: grid; place-items: center; font-weight: 700; font-size: 14px;
+}
+.pay-method-chevron { color: var(--muted); font-size: 22px; }
+.pay-sheet .btn.block { margin-top: 8px; }
+
+/* 注文・取引 */
+.order-list { list-style: none; padding: 0; margin: 16px 0; display: grid; gap: 10px; }
+.order-row {
+  display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-radius: var(--radius-lg);
+  background: #fff; box-shadow: var(--card-shadow); color: var(--text);
+}
+.order-row:hover { text-decoration: none; box-shadow: 0 1px 3px rgba(60, 64, 67, .22), 0 6px 18px rgba(60, 64, 67, .12); }
+.order-thumb {
+  width: 52px; height: 52px; border-radius: 14px; overflow: hidden; background: var(--pay-soft);
+  display: grid; place-items: center; flex: 0 0 auto; color: var(--muted);
+}
+.order-thumb.big { width: 72px; height: 72px; }
+.order-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.order-body { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.order-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.order-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.order-amount { font-weight: 500; font-size: 15px; }
+
+.status-chip { font-size: 12px; border-radius: 999px; padding: 3px 10px; white-space: nowrap; background: #f1f3f4; color: #3c4043; }
+.status-chip.s-pending_payment { background: #fef7e0; color: #7a4b00; }
+.status-chip.s-open { background: #e8f0fe; color: var(--pay-blue-deep); }
+.status-chip.s-completed { background: #e6f4ea; color: var(--ok); }
+.status-chip.s-cancelled { background: #f1f3f4; color: var(--muted); }
+
+.order-page { max-width: 760px; }
+.pay-card { padding: 22px; margin: 12px 0; }
+.pay-card-head { display: flex; align-items: center; gap: 14px; }
+.pay-card-info { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.pay-card-title { font-size: 18px; font-weight: 500; }
+.pay-card-amount { display: flex; flex-direction: column; margin: 18px 0 8px; }
+.pay-card-amount strong { font-size: 34px; font-weight: 500; }
+.pay-card-amount span { font-size: 16px; color: var(--muted); }
+.pay-hint { color: var(--muted); margin: 10px 0 0; }
+
+.stepper { list-style: none; display: flex; gap: 8px; padding: 0; margin: 16px 0; counter-reset: s; }
+.stepper li { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); text-align: center; }
+.stepper li::before { content: none; }
+.step-dot {
+  width: 28px; height: 28px; border-radius: 50%; background: var(--pay-soft); color: var(--muted);
+  display: grid; place-items: center; font-size: 13px; font-weight: 500;
+}
+.stepper li.done .step-dot { background: var(--ok); color: #fff; }
+.stepper li.done { color: var(--text); }
+
+.confirm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 6px 0 14px; }
+.confirm-item {
+  display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border-radius: var(--radius);
+  background: var(--pay-soft);
+}
+.confirm-item.on { background: #e6f4ea; }
+.confirm-item.on strong { color: var(--ok); }
+
+/* DM（チャットの吹き出し） */
+.thread {
+  background: #fff; border-radius: var(--radius-lg); box-shadow: var(--card-shadow);
+  display: flex; flex-direction: column; overflow: hidden; margin-top: 16px;
+}
+.thread-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid #eceef1; }
+.small-avatar { width: 32px; height: 32px; font-size: 14px; }
+.thread-body {
+  display: flex; flex-direction: column; gap: 8px; padding: 16px; min-height: 240px; max-height: 420px;
+  overflow-y: auto; background: #fafbfc;
+}
+.bubble-row { display: flex; }
+.bubble-row.mine { justify-content: flex-end; }
+.bubble {
+  max-width: 78%; background: #fff; border-radius: 18px 18px 18px 6px; padding: 9px 13px;
+  box-shadow: 0 1px 1px rgba(60, 64, 67, .12);
+}
+.bubble p { margin: 0; white-space: pre-wrap; word-break: break-word; line-height: 1.6; font-size: 14px; }
+.bubble.mine { background: var(--pay-blue); color: #fff; border-radius: 18px 18px 6px 18px; }
+.bubble-time { display: block; font-size: 11px; opacity: .65; margin-top: 3px; text-align: right; }
+.thread-input { display: flex; gap: 8px; align-items: flex-end; padding: 10px 12px; border-top: 1px solid #eceef1; }
+.thread-input textarea {
+  flex: 1; resize: none; border: 1px solid #dadce0; border-radius: 22px; padding: 10px 16px; min-height: 42px;
+  font-size: 14px; line-height: 1.5;
+}
+.thread-input button { width: 42px; height: 42px; padding: 0; display: grid; place-items: center; }
+.thread-closed { padding: 14px 18px; margin: 0; border-top: 1px solid #eceef1; }
+
+/* ウォレット（Google Pay の残高カードのように） */
+.wallet { max-width: 760px; display: flex; flex-direction: column; gap: 16px; }
+.wallet-card {
+  background: linear-gradient(135deg, #1a73e8 0%, #0b57d0 55%, #0a4cb8 100%);
+  color: #fff; border-radius: 28px; padding: 22px 24px 18px; box-shadow: 0 6px 20px rgba(26, 115, 232, .35);
+}
+.wallet-card-top { display: flex; align-items: center; justify-content: space-between; }
+.wallet-brand { font-size: 15px; opacity: .92; font-weight: 500; }
+.wallet-logo {
+  width: 36px; height: 36px; border-radius: 50%; background: rgba(255, 255, 255, .2);
+  display: grid; place-items: center; font-weight: 700; font-size: 13px;
+}
+.wallet-balance { display: flex; flex-direction: column; margin: 26px 0 18px; }
+.wallet-balance strong { font-size: 44px; font-weight: 500; letter-spacing: -.5px; }
+.wallet-balance strong span { font-size: 20px; opacity: .85; }
+.wallet-balance .small { opacity: .85; }
+.wallet-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.wallet-action {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 6px;
+  border-radius: 18px; background: rgba(255, 255, 255, .16); color: #fff; text-decoration: none; font-size: 13px;
+}
+.wallet-action:hover { background: rgba(255, 255, 255, .26); text-decoration: none; }
+.wallet-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.wallet-tile { background: #fff; border-radius: var(--radius-lg); box-shadow: var(--card-shadow); padding: 16px 18px; display: flex; flex-direction: column; gap: 4px; }
+.wallet-tile strong { font-size: 22px; font-weight: 500; }
+.activity { background: #fff; border-radius: var(--radius-lg); box-shadow: var(--card-shadow); padding: 16px 18px; }
+.activity-list { list-style: none; padding: 0; margin: 0; }
+.activity-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #f1f3f4; }
+.activity-row:last-child { border-bottom: 0; }
+.activity-icon {
+  width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: #fce8e6; color: var(--danger); flex: 0 0 auto;
+}
+.activity-icon.t-refund, .activity-icon.t-sale { background: #e6f4ea; color: var(--ok); }
+.activity-body { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.activity-amount { font-weight: 500; }
+.activity-amount.plus { color: var(--ok); }
+
+/* 閲覧（マンガ・画像・小説） */
+.viewer { min-height: 100vh; display: flex; flex-direction: column; background: #111; color: #fff; }
+.viewer-bar {
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: rgba(20, 20, 20, .92);
+  position: sticky; top: 0; z-index: 5; flex-wrap: wrap;
+}
+.viewer-bar .icon-btn { color: #fff; }
+.viewer-title { flex: 1; font-size: 15px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 120px; }
+.viewer-tools { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip-btn {
+  border: 1px solid rgba(255, 255, 255, .3); background: transparent; color: #fff; border-radius: 999px;
+  padding: 5px 12px; font-size: 13px; cursor: pointer;
+}
+.chip-btn.on { background: #fff; color: #111; border-color: #fff; }
+.viewer-stage { flex: 1; display: grid; place-items: center; cursor: pointer; touch-action: pan-y; user-select: none; padding: 8px; }
+.page-img { display: block; }
+.page-img.contain { max-width: 100%; max-height: calc(100vh - 150px); width: auto; height: auto; object-fit: contain; margin: 0 auto; }
+.page-img.width { width: 100%; max-width: 900px; height: auto; margin: 0 auto 6px; }
+.viewer-scroll { display: flex; flex-direction: column; align-items: center; }
+.viewer-foot {
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+  background: rgba(20, 20, 20, .92); position: sticky; bottom: 0; flex-wrap: wrap;
+}
+.viewer-foot input[type="range"] { flex: 1; min-width: 120px; }
+.viewer-foot .btn.ghost { color: #fff; border-color: rgba(255, 255, 255, .4); }
+.viewer-foot .btn:disabled { opacity: .35; }
+.viewer-message { max-width: 520px; margin: 80px auto; text-align: center; display: flex; flex-direction: column; gap: 16px; align-items: center; padding: 0 20px; }
+.image-viewer .notice, .image-viewer .muted { color: #ddd; }
+
+.novel-viewer { --paper: #fff; --ink: #202124; background: var(--paper); color: var(--ink); }
+.novel-viewer.theme-sepia { --paper: #f4ecd8; --ink: #3b2f1e; }
+.novel-viewer.theme-dark { --paper: #1c1c1e; --ink: #d8d8d8; }
+.novel-viewer.theme-white, .novel-viewer.theme-sepia, .novel-viewer.theme-dark { background: var(--paper); color: var(--ink); }
+.novel-viewer .viewer-bar { background: var(--paper); color: var(--ink); border-bottom: 1px solid rgba(0, 0, 0, .08); }
+.novel-viewer .viewer-bar .icon-btn { color: var(--ink); }
+.novel-viewer .chip-btn { color: var(--ink); border-color: rgba(127, 127, 127, .5); }
+.novel-viewer .chip-btn.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.novel-viewer .viewer-foot { background: var(--paper); color: var(--ink); border-top: 1px solid rgba(0, 0, 0, .08); }
+.novel-page { flex: 1; width: 100%; max-width: 680px; margin: 0 auto; padding: 28px 22px 48px; }
+.novel-page .muted, .novel-page .small { color: inherit; opacity: .6; }
+.chapter-title { font-size: 1.35em; font-weight: 500; margin: 6px 0 22px; }
+.novel-body { font-size: var(--novel-size, 17px); line-height: 2; letter-spacing: .02em; }
+.novel-body p { margin: 0 0 1em; text-indent: 1em; }
+.chapter-nav { display: flex; justify-content: space-between; gap: 12px; margin-top: 36px; }
+.toc-panel {
+  list-style: none; margin: 0; padding: 8px; max-height: 60vh; overflow-y: auto; background: var(--paper, #fff);
+  color: var(--ink, #202124); border-bottom: 1px solid rgba(0, 0, 0, .1); position: sticky; top: 56px; z-index: 4;
+}
+.toc-item {
+  width: 100%; text-align: left; border: 0; background: transparent; padding: 10px 12px; border-radius: 10px;
+  color: inherit; cursor: pointer; font-size: 14px;
+}
+.toc-item.on, .toc-item:hover { background: rgba(127, 127, 127, .15); }
+.swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+.swatch.on { border-color: var(--pay-blue); }
+.swatch-white { background: #fff; box-shadow: inset 0 0 0 1px #ccc; }
+.swatch-sepia { background: #f4ecd8; box-shadow: inset 0 0 0 1px #c9b890; }
+.swatch-dark { background: #1c1c1e; }
+
+/* 作る・直す（種類の選択・章の編集） */
+.dev-editor { display: flex; flex-direction: column; gap: 16px; }
+.dev-editor .editor-card { padding: 18px 20px; }
+.kind-picker { display: flex; flex-wrap: wrap; gap: 8px; }
+.kind-option {
+  border: 1px solid #dadce0; background: #fff; border-radius: 999px; padding: 9px 16px; cursor: pointer; font-size: 14px;
+}
+.kind-option.on { background: #e8f0fe; border-color: var(--pay-blue); color: var(--pay-blue-deep); font-weight: 500; }
+.kind-option:disabled { cursor: default; opacity: .7; }
+.chapter-editor { list-style: none; padding: 0; margin: 12px 0; display: flex; flex-direction: column; gap: 12px; }
+.chapter-row { display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: var(--radius); background: var(--pay-soft); }
+.chapter-row input, .chapter-row textarea { border: 1px solid #dadce0; border-radius: 10px; padding: 8px 12px; background: #fff; }
+.chapter-row textarea { min-height: 160px; line-height: 1.8; }
+
+/* 下部タブ（スマホ） */
+.bottom-nav { display: none; }
+@media (max-width: 860px) {
+  .content { padding: 16px 14px 96px; }
+  .bottom-nav {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; justify-content: space-around;
+    background: #fff; border-top: 1px solid #eceef1; padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+  }
+  .bn-item {
+    display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: var(--muted);
+    text-decoration: none; padding: 4px 10px; border-radius: 999px; min-width: 64px;
+  }
+  .bn-item.active { color: var(--pay-blue-deep); }
+  .bn-item.active svg { fill: var(--pay-blue-deep); }
+  .bn-item.active span { color: var(--pay-blue-deep); }
+  .bn-item:hover { text-decoration: none; }
+  .wallet-tiles { grid-template-columns: 1fr; }
+  .detail-head { flex-direction: column; }
+  .stepper li { font-size: 11px; }
+  .order-side { align-items: flex-end; }
+}
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes sheetUp { from { transform: translateY(40px); opacity: .4; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .pay-sheet, .sheet-backdrop { animation: none; }
 }

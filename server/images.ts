@@ -29,6 +29,18 @@ export async function saveImageBlob(buffer: Buffer, mime: string): Promise<strin
   return id;
 }
 
+// 画像の中身を読む（認可つきの配信で使う。公開の /api/images とは別に、購入した中身の配信に使う）
+export async function readImageBlob(id: string): Promise<{ type: string; data: Buffer } | null> {
+  if (!ID_PATTERN.test(id)) return null;
+  const rows = await tursoExecute("select content_type, data from sa_blobs where id = ? limit 1", [{ type: "text", value: id }]);
+  const row = rows[0] as TursoValue[] | undefined;
+  if (!row) return null;
+  return {
+    type: row[0].type === "text" ? row[0].value : "application/octet-stream",
+    data: row[1].type === "blob" ? Buffer.from(row[1].base64, "base64") : Buffer.alloc(0)
+  };
+}
+
 export async function deleteImageBlobs(ids: string[]): Promise<void> {
   for (const id of ids.filter((x) => ID_PATTERN.test(x))) {
     await tursoExecute("delete from sa_blobs where id = ?", [{ type: "text", value: id }]);

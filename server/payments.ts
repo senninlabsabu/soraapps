@@ -14,7 +14,7 @@ type PaymentRow = { id: string; amount: number; status: "pending" | "completed" 
 async function openPayment(args: {
   me: string;
   appId: string;
-  kind: "purchase" | "charge" | "iap";
+  kind: "purchase" | "charge" | "iap" | "order";
   amount: number;
   title: string;
   requestId: string | null;
@@ -282,4 +282,44 @@ async function grantEntitlement(me: string, appId: string, sku: string, purchase
     .from("sa_app_entitlements")
     .upsert({ user_id: me, app_id: appId, sku, purchase_id: purchaseId }, { onConflict: "user_id,app_id,sku", ignoreDuplicates: true });
   if (error) throw error;
+}
+
+// ---------- 手渡しグッズ（注文・エスクロー） ----------
+// 代金は購入時に預かる（作者へはまだ入金しない）。入金は、両者が受け取り済みにしたときに orders 側で行う。
+
+// 注文の代金を支払う（ポイントを減らし、支払いの記録を完了にする）。同じ注文IDなら二重には払わない
+export async function payForOrder(
+  me: string,
+  app: AppRow,
+  order: { id: string; amount: number }
+): Promise<{ purchaseId: string; replayed: boolean }> {
+  return withLock(`pay:${me}`, async () => {
+    if (!(await isLinked(me))) throw new SenninError("not_linked", NOT_LINKED_MESSAGE);
+    const payment = await openPayment({
+      me,
+      appId: app.id,
+      kind: "order",
+      amount: order.amount,
+      title: app.name,
+      requestId: order.id
+    });
+    if (payment.status === "failed") {
+      throw new SenninError("failed", "この注文の支払いは失敗しています。新しい注文をしてください。");
+    }
+    if (payment.status === "completed") return { purchaseId: payment.id, replayed: true };
+    const result = await debit(me, payment, `soraapps：「${app.name}」（手渡し）`);
+    await complete(payment.id, result.ledgerId);
+    return { purchaseId: payment.id, replayed: result.replayed };
+  });
+}
+
+// 注文のキャンセル：預かっていた代金を買った人へ返す（同じ注文IDなら二重には返さない）
+export async function refundOrder(buyerId: string, orderId: string, amount: number, title: string): Promise<void> {
+  await withLock(`pay:${buyerId}`, async () => {
+    await adjustPoints(buyerId, {
+      amount,
+      reason: `soraapps：「${title}」の注文を取り消し（返金）`.slice(0, 100),
+      idempotencyKey: `sa-refund-${orderId}`
+    });
+  });
 }

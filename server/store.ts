@@ -9,7 +9,7 @@ import { imageUrl } from "./images.js";
 import { addFreeApp, purchaseApp } from "./payments.js";
 import { fetchBalance, isLinked, NOT_LINKED_MESSAGE } from "./sennin.js";
 import { ApiError, sendError } from "./errors.js";
-import { CATEGORIES, checkText, REPORT_HIDE_THRESHOLD } from "./rules.js";
+import { CATEGORIES, checkText, isKind, REPORT_HIDE_THRESHOLD } from "./rules.js";
 
 export const store = Router();
 
@@ -31,6 +31,8 @@ store.get("/store/apps", optionalAuth, async (req, res) => {
   if (error) throw error;
 
   let rows = (data ?? []) as AppRow[];
+  const kind = typeof req.query.kind === "string" ? req.query.kind : "";
+  if (isKind(kind)) rows = rows.filter((r) => r.kind === kind);
   if ((CATEGORIES as readonly string[]).includes(category)) rows = rows.filter((r) => r.category === category);
   if (q) rows = rows.filter((r) => `${r.name} ${r.description} ${r.creator?.display_name ?? ""}`.toLowerCase().includes(q));
 
@@ -65,6 +67,11 @@ store.get("/store/apps/:id", optionalAuth, async (req, res) => {
     updatedAt: r.updated_at as string
   }));
   // 商品紹介画像・アプリ内課金の商品（持っているかどうか付き）
+  // マンガ・画像のページ数、小説の章の一覧（見出しだけ。本文は買った人だけが読む）
+  const [{ data: chapterRows }, { count: pageCount }] = await Promise.all([
+    sb.from("sa_content_chapters").select("title").eq("app_id", row.id).order("position"),
+    sb.from("sa_content_pages").select("position", { count: "exact", head: true }).eq("app_id", row.id)
+  ]);
   const [{ data: images }, { data: products }, { data: owned }] = await Promise.all([
     sb.from("sa_app_images").select("blob_id, position").eq("app_id", row.id).order("position"),
     sb.from("sa_app_products").select("sku, title, description, price").eq("app_id", row.id).order("position"),
@@ -79,6 +86,10 @@ store.get("/store/apps/:id", optionalAuth, async (req, res) => {
     app: card,
     images: (images ?? []).map((i) => imageUrl(i.blob_id as string)),
     products: (products ?? []).map((p) => ({ ...p, owned: ownedSkus.has(p.sku as string) })),
+    contents: {
+      pageCount: pageCount ?? 0,
+      chapters: (chapterRows ?? []).map((c, i) => ({ index: i, title: c.title as string }))
+    },
     isCreator: Boolean(me && row.creator_id === me),
     reviews: list,
     myReview: list.find((r) => r.mine) ?? null,
@@ -150,6 +161,7 @@ store.post("/store/apps/:id/add", requireAuth, async (req, res) => {
     const row = await loadApp(String(req.params.id));
     if (!row || row.status !== "published") throw new ApiError(404, "not_found", "拡張機能が見つかりません。");
     if (row.creator_id === me) throw new ApiError(400, "own", "自分の拡張機能は追加できません。実行は「マイアプリ」から。");
+    if (row.kind === "goods") throw new ApiError(400, "invalid", "手渡しの商品は「注文する」から注文してください。");
     if (row.price === 0) {
       const { data: owned } = await sb.from("sa_app_owned").select("user_id").eq("user_id", me).eq("app_id", row.id).maybeSingle();
       if (owned) throw new ApiError(409, "owned", "すでに持っています。");
