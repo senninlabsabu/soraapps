@@ -234,73 +234,97 @@ function readFields(body: Record<string, string | undefined>, files: Uploaded, r
   };
 }
 
-async function uploadThumb(file: Express.Multer.File): Promise<string> {
-  const image = sniffImage(file.buffer);
-  if (!image) throw new ApiError(400, "invalid", "サムネイルの形式を読み取れませんでした。");
-  return imageUrl(await saveImageBlob(file.buffer, image.mime));
+// 失敗した手順の名前を画面に返す（詳しい理由はログに残す）
+function dbFail(step: string, error: unknown): never {
+  console.error(`[apps] ${step}に失敗:`, error);
+  const detail = error && typeof error === "object" && "message" in error ? String((error as { message: unknown }).message) : "";
+  throw new ApiError(500, "db", `${step}に失敗しました。${detail ? `（${detail}）` : ""}少し時間をおいて、もう一度お試しください。`);
 }
 
-// 商品紹介画像を Turso に保存し、並び順つきで記録する（既存の画像は置き換える）
-async function replaceShots(appId: string, files: Express.Multer.File[]) {
-  const { data: old, error: oldError } = await sb.from("sa_app_images").select("blob_id").eq("app_id", appId);
-  if (oldError) throw oldError;
-  if (old?.length) {
-    const { error: deleteError } = await sb.from("sa_app_images").delete().eq("app_id", appId);
-    if (deleteError) throw deleteError;
-    await deleteImageBlobs(old.map((o) => o.blob_id as string)).catch((error) => console.error("[apps] 古い画像の削除に失敗:", error));
+// 画像の形式を確かめてから Turso に保存する。作った ID は track に入れ、失敗したとき消せるようにする
+async function storeImage(file: Express.Multer.File, track: string[], label: string): Promise<string> {
+  const image = sniffImage(file.buffer);
+  if (!image) throw new ApiError(400, "invalid", `${label}の形式を読み取れませんでした。`);
+  const id = await saveImageBlob(file.buffer, image.mime);
+  track.push(id);
+  return id;
+}
+
+// 途中で失敗したときの後始末：新しく作った作品（子の行も一緒に消える）と、保存した画像を消す
+async function rollback(track: string[], newAppId: string | null) {
+  if (newAppId) {
+    const { error } = await sb.from("sa_apps").delete().eq("id", newAppId);
+    if (error) console.error("[apps] 作りかけの作品の削除に失敗:", error);
   }
+  if (track.length) await deleteImageBlobs(track).catch((error) => console.error("[apps] 画像の後始末に失敗:", error));
+}
+
+async function uploadThumb(file: Express.Multer.File, track: string[]): Promise<string> {
+  return imageUrl(await storeImage(file, track, "サムネイル"));
+}
+
+// 商品紹介画像：新しい画像を先に保存・登録し、そのあとで古いものを消す（途中で失敗しても前の画像は残る）
+async function replaceShots(appId: string, files: Express.Multer.File[], track: string[]) {
+  const { data: old, error: oldError } = await sb.from("sa_app_images").select("blob_id").eq("app_id", appId);
+  if (oldError) dbFail("紹介画像の確認", oldError);
   const rows: { app_id: string; position: number; blob_id: string }[] = [];
   for (const [position, file] of files.entries()) {
-    const image = sniffImage(file.buffer);
-    if (!image) throw new ApiError(400, "invalid", "紹介画像の形式を読み取れませんでした。");
-    rows.push({ app_id: appId, position, blob_id: await saveImageBlob(file.buffer, image.mime) });
+    rows.push({ app_id: appId, position, blob_id: await storeImage(file, track, `${position + 1}枚目の紹介画像`) });
   }
   if (rows.length) {
     const { error } = await sb.from("sa_app_images").insert(rows);
-    if (error) throw error;
+    if (error) dbFail("紹介画像の保存", error);
+  }
+  const oldIds = (old ?? []).map((o) => o.blob_id as string);
+  if (oldIds.length) {
+    const { error } = await sb.from("sa_app_images").delete().eq("app_id", appId).in("blob_id", oldIds);
+    if (error) {
+      console.error("[apps] 古い紹介画像の行の削除に失敗（画像は残します）:", error);
+      return;
+    }
+    await deleteImageBlobs(oldIds).catch((error) => console.error("[apps] 古い画像の削除に失敗:", error));
   }
 }
 
-// マンガ・画像のページを置き換える（失敗したら、もう一度アップロードしてください）
-async function replacePages(appId: string, files: Express.Multer.File[]) {
+// マンガ・画像のページを置き換える（主キーが作品と並び順なので、先に古い行を消してから入れる）
+async function replacePages(appId: string, files: Express.Multer.File[], track: string[]) {
   const { data: old, error: oldError } = await sb.from("sa_content_pages").select("blob_id").eq("app_id", appId);
-  if (oldError) throw oldError;
-  const { error: deleteError } = await sb.from("sa_content_pages").delete().eq("app_id", appId);
-  if (deleteError) throw deleteError;
-  if (old?.length) {
-    await deleteImageBlobs(old.map((o) => o.blob_id as string)).catch((error) => console.error("[apps] 古いページの削除に失敗:", error));
-  }
+  if (oldError) dbFail("ページの確認", oldError);
   const rows: { app_id: string; position: number; blob_id: string }[] = [];
   for (const [position, file] of files.entries()) {
-    const image = sniffImage(file.buffer);
-    if (!image) throw new ApiError(400, "invalid", `${position + 1}ページ目の形式を読み取れませんでした。`);
-    rows.push({ app_id: appId, position, blob_id: await saveImageBlob(file.buffer, image.mime) });
+    rows.push({ app_id: appId, position, blob_id: await storeImage(file, track, `${position + 1}ページ目`) });
   }
+  const { error: deleteError } = await sb.from("sa_content_pages").delete().eq("app_id", appId);
+  if (deleteError) dbFail("ページの入れ替え", deleteError);
   const { error } = await sb.from("sa_content_pages").insert(rows);
-  if (error) throw error;
+  if (error) dbFail("ページの保存", error);
+  const oldIds = (old ?? []).map((o) => o.blob_id as string);
+  if (oldIds.length) await deleteImageBlobs(oldIds).catch((error) => console.error("[apps] 古いページの削除に失敗:", error));
 }
 
 // 小説の章を置き換える
 async function replaceChapters(appId: string, items: ChapterInput[]) {
   const { error: deleteError } = await sb.from("sa_content_chapters").delete().eq("app_id", appId);
-  if (deleteError) throw deleteError;
+  if (deleteError) dbFail("章の入れ替え", deleteError);
   const { error } = await sb.from("sa_content_chapters").insert(
     items.map((item, position) => ({ app_id: appId, position, title: item.title, body: item.body }))
   );
-  if (error) throw error;
+  if (error) dbFail("章の保存", error);
 }
 
 // アプリ内課金の商品を置き換える（買い切りの記録は残るので、買った人は引き続き持っている）
 async function replaceProducts(appId: string, items: ProductInput[]) {
   const { error: deleteError } = await sb.from("sa_app_products").delete().eq("app_id", appId);
-  if (deleteError) throw deleteError;
+  if (deleteError) dbFail("商品の入れ替え", deleteError);
   if (!items.length) return;
   const { error } = await sb.from("sa_app_products").insert(items.map((item, position) => ({ app_id: appId, position, ...item })));
-  if (error) throw error;
+  if (error) dbFail("商品の保存", error);
 }
 
 // 公開（新しい作品を作る）
 dev.post("/dev/apps", upload, async (req, res) => {
+  const track: string[] = [];
+  let newAppId: string | null = null;
   try {
     const me = currentUserId(res);
     await assertCreatorActive(me);
@@ -309,13 +333,14 @@ dev.post("/dev/apps", upload, async (req, res) => {
       .select("id", { count: "exact", head: true })
       .eq("creator_id", me)
       .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
-    if (countError) throw countError;
+    if (countError) dbFail("公開数の確認", countError);
     if ((count ?? 0) >= DAILY_APP_LIMIT) throw new ApiError(429, "daily", `1日に公開できるのは${DAILY_APP_LIMIT}件までです。`);
 
     const files = filesOf(req);
     const fields = readFields(req.body, files, true, null);
     const id = randomUUID();
-    const thumbUrl = await uploadThumb(files.thumb as Express.Multer.File);
+    // 画像は先に Turso へ保存する（ここで失敗すれば、作品はまだ作られていない）
+    const thumbUrl = await uploadThumb(files.thumb as Express.Multer.File, track);
 
     const { error } = await sb.from("sa_apps").insert({
       id,
@@ -330,23 +355,27 @@ dev.post("/dev/apps", upload, async (req, res) => {
       status: "published",
       thumb_url: thumbUrl
     });
-    if (error) throw error;
+    if (error) dbFail("作品の登録", error);
+    newAppId = id;
+
     if (fields.kind === "extension") {
       const { error: codeError } = await sb.from("sa_app_code").insert({ app_id: id, ...fields.code });
-      if (codeError) throw codeError;
+      if (codeError) dbFail("コードの保存", codeError);
     }
-    await replaceShots(id, fields.shots);
+    await replaceShots(id, fields.shots, track);
     await replaceProducts(id, fields.products);
-    if (fields.pages.length) await replacePages(id, fields.pages);
+    if (fields.pages.length) await replacePages(id, fields.pages, track);
     if (fields.chapters) await replaceChapters(id, fields.chapters);
     res.status(201).json({ ok: true, id });
   } catch (error) {
+    await rollback(track, newAppId);
     sendError(res, error);
   }
 });
 
 // 編集（名前・説明・カテゴリ・価格・サムネイル・中身）。買った人の手元にも反映される
 dev.post("/dev/apps/:id", upload, async (req, res) => {
+  const track: string[] = [];
   try {
     const me = currentUserId(res);
     await assertCreatorActive(me);
@@ -366,25 +395,27 @@ dev.post("/dev/apps/:id", upload, async (req, res) => {
       update.stock = fields.stock;
       update.handover_note = fields.handoverNote;
     }
+    if (files.thumb) update.thumb_url = await uploadThumb(files.thumb, track);
+
+    const { error } = await sb.from("sa_apps").update(update).eq("id", row.id);
+    if (error) dbFail("作品の更新", error);
+    // 古いサムネイルは、新しいものに置き換わったあとで消す（更新に失敗しても、前のサムネイルは残る）
     if (files.thumb) {
-      update.thumb_url = await uploadThumb(files.thumb);
       const oldId = imageIdFromUrl(row.thumb_url);
       if (oldId) await deleteImageBlobs([oldId]).catch((error) => console.error("[apps] 古いサムネイルの削除に失敗:", error));
     }
-
-    const { error } = await sb.from("sa_apps").update(update).eq("id", row.id);
-    if (error) throw error;
     if (fields.kind === "extension") {
       const { error: codeError } = await sb.from("sa_app_code").upsert({ app_id: row.id, ...fields.code }, { onConflict: "app_id" });
-      if (codeError) throw codeError;
+      if (codeError) dbFail("コードの保存", codeError);
       await replaceProducts(row.id, fields.products);
     }
     // 紹介画像・ページ・章は、新しく送られてきたときだけ置き換える
-    if (fields.shots.length) await replaceShots(row.id, fields.shots);
-    if (fields.pages.length) await replacePages(row.id, fields.pages);
+    if (fields.shots.length) await replaceShots(row.id, fields.shots, track);
+    if (fields.pages.length) await replacePages(row.id, fields.pages, track);
     if (fields.chapters) await replaceChapters(row.id, fields.chapters);
     res.json({ ok: true });
   } catch (error) {
+    await rollback(track, null);
     sendError(res, error);
   }
 });
