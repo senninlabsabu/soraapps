@@ -53,7 +53,11 @@ const upload = multer({
 ]);
 
 type Uploaded = { thumb?: Express.Multer.File; shots?: Express.Multer.File[]; pages?: Express.Multer.File[] };
-const filesOf = (req: { files?: unknown }): Uploaded => (req.files ?? {}) as Uploaded;
+// multer の .fields() は、各欄を配列で渡す（例: thumb は [ファイル]）。1枚だけの欄は先頭を取り出す
+const filesOf = (req: { files?: unknown }): Uploaded => {
+  const raw = (req.files ?? {}) as Record<string, Express.Multer.File[] | undefined>;
+  return { thumb: raw.thumb?.[0], shots: raw.shots ?? [], pages: raw.pages ?? [] };
+};
 
 // 作者の停止の確認（停止中は公開・編集できない）
 async function assertCreatorActive(me: string) {
